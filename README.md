@@ -1,0 +1,2 @@
+# d-dnspod
+dnspod-client
