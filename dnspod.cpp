@@ -5,11 +5,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <map>
+#include <set>
+#include <fstream>
 
 #include <boost/asio.hpp>
-#include <boost/property_tree/ptree.hpp>
-#include <boost/property_tree/json_parser.hpp>
-
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
@@ -19,38 +19,7 @@
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/stream.hpp>
 
-class file_helper
-{
-private:
-    /* data */
-public:
-    file_helper() = default;
-    ~file_helper();
-
-    bool open(const std::string &file_name, const int mode);
-
-    bool read(std::string &data);
-
-    bool read(std::string &data, const std::size_t file_Size);
-
-    bool write(const std::string &data);
-
-    bool write_truncate_atomic(const std::string &data);
-
-    int fd() const 
-    {
-        return fd_;
-    }
-
-    const std::string& file_name() const
-    {
-        return file_name_;
-    }
-
-private:
-    int fd_ = -1;
-    std::string file_name_;
-};
+#include <nlohmann/json.hpp>
 
 struct do_on_exit
 {
@@ -67,22 +36,69 @@ private:
     std::function<void(void)> do_on_exit_hd_;
 };
 
-static bool http_sync_request(const std::string &host,
+struct record_info
+{
+    uint32_t record_id = 0;
+    std::string record_name;
+    std::string record_type;
+    std::string record_value;
+    std::string enabled;
+    inline bool operator<(const record_info &other) const
+    {
+        return record_id < other.record_id || record_value < other.record_value;
+    }
+};
+
+struct domain_info
+{
+    uint32_t domain_id = 0;
+    uint32_t records = 0;
+    std::string domain;
+    std::set<record_info> record_info_vec;
+};
+
+static bool http_sync_request(const boost::beast::http::verb method,
+                              const std::string &host,
                               const std::string &port = "443",
                               const std::string &path = "/",
+                              const std::string &request = "",
+                              const std::map<boost::beast::http::field, std::string> &header = std::map<boost::beast::http::field, std::string>(),
                               std::string *resp = nullptr);
 
 int main(int argc, char **argv)
 {
     if (argc < 2)
     {
+        fprintf(stderr, "the config path must set\n");
+        return 1;
+    }
+
+    try
+    {
+        std::ifstream ifs(argv[1]);
+        if (!ifs)
+        {
+            fprintf(stderr, "open config: %s failed\n", argv[1]);
+            return 1;
+        }
+
+        nlohmann::json config_json;
+        ifs >> config_json;
         
+        std::map<std::string, domain_info> domain_info_map;
+    }
+    catch(const std::exception &err)
+    {
+
     }
 }
 
-bool http_sync_request(const std::string &host,
+bool http_sync_request(const boost::beast::http::verb method,
+                       const std::string &host,
                        const std::string &port,
                        const std::string &path,
+                       const std::string &request,
+                       const std::map<boost::beast::http::field, std::string> &header,
                        std::string *resp)
 {
     namespace beast = boost::beast; // from <boost/beast.hpp>
@@ -90,7 +106,6 @@ bool http_sync_request(const std::string &host,
     namespace net = boost::asio;    // from <boost/asio.hpp>
     namespace ssl = net::ssl;       // from <boost/asio/ssl.hpp>
     using tcp = net::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
-
 
     try
     {
@@ -111,11 +126,15 @@ bool http_sync_request(const std::string &host,
         auto const results = resolver.resolve(host, port);
         beast::get_lowest_layer(stream).connect(results);
         stream.handshake(ssl::stream_base::client);
-        http::request<http::string_body> req{http::verb::get, path, 11};
+        http::request<http::string_body> req{method, path, 11, request};
         req.set(http::field::host, host);
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        http::write(stream, req);
+        for (auto &item : header)
+        {
+            req.set(item.first, item.second);
+        }
 
+        http::write(stream, req);
         beast::flat_buffer buffer;
 
         http::response<http::string_body> res;
