@@ -12,12 +12,25 @@
 #include <chrono>
 #include <regex>
 
-#include <boost/lexical_cast.hpp>
 #include <nlohmann/json.hpp>
+
+#ifndef CPPHTTPLIB_OPENSSL_SUPPORT
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#endif
+
+#include <http/httplib.h>
 
 static std::string get_current_time();
 
 #define LOG_MSG(fmt, args...) fprintf(stderr, "%s: " fmt "\n", get_current_time().c_str(), ## args)
+
+enum http_method
+{
+    kGET = 0,
+    kPUT,
+    kPOST,
+    kDELETE
+};
 
 struct record_info
 {
@@ -44,13 +57,14 @@ static std::string GetValue(const nlohmann::json &js,
                             const std::string &key,
                             const char *default_value);
 
-static bool http_sync_request(const boost::beast::http::verb method,
+static bool http_sync_request(const http_method method,
                               const std::string &host,
-                              const std::string &port,
+                              const uint16_t port,
                               const std::string &path,
+                              const httplib::Headers &header,
                               const std::string &request,
-                              const std::map<boost::beast::http::field, std::string> *header,
-                              std::string *resp);
+                              const std::string &content_type,
+                              std::string &resp_str);
 
 static bool dnspod_api(const std::string &path,
                        const std::string &request,
@@ -248,7 +262,10 @@ static std::string GetValue(const nlohmann::json &js, const std::string &key, co
         {
             return it.value();
         }
-        return boost::lexical_cast<std::string>(it.value());
+        if (it->is_number())
+        {
+            return std::to_string(it.value());
+        }
     }
     catch (...)
     {
@@ -256,73 +273,39 @@ static std::string GetValue(const nlohmann::json &js, const std::string &key, co
     }
 }
 
-bool http_sync_request(const boost::beast::http::verb method,
-                       const std::string &host,
-                       const std::string &port,
-                       const std::string &path,
-                       const std::string &request,
-                       const std::map<boost::beast::http::field, std::string> *header,
-                       std::string *resp)
+static bool http_sync_request(const http_method method,
+                              const std::string &host,
+                              const uint16_t port,
+                              const std::string &path,
+                              const httplib::Headers &header,
+                              const std::string &request,
+                              const std::string &content_type,
+                              std::string &resp_str)
 {
-    namespace beast = boost::beast; // from <boost/beast.hpp>
-    namespace http = beast::http;   // from <boost/beast/http.hpp>
-    namespace net = boost::asio;    // from <boost/asio.hpp>
-    namespace ssl = net::ssl;       // from <boost/asio/ssl.hpp>
-    using tcp = net::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
-
     try
     {
-        ssl::context ctx(ssl::context::tls_client);
-        ctx.set_default_verify_paths();
-        ctx.set_verify_mode(ssl::verify_peer);
-
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);
-
-        if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
+        httplib::SSLClient cli(host, port);
+        cli.enable_server_certificate_verification(true);
+        httplib::Result resp(nullptr, httplib::Error::Unknown);
+        switch (method)
         {
-            beast::error_code ec{static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()};
-            throw beast::system_error{ec};
+        case http_method::kGET :
+            resp = cli.Get(path.c_str(), header);
+            break;
+        case http_method::kPUT :
+            resp = cli.Put(path.c_str(), header, request, content_type.c_str());
+            break;
+        case http_method::kPOST :
+            resp = cli.Post(path.c_str(), header, request, content_type.c_str());
+            break;
+        case http_method::kDELETE :
+            resp = cli.Delete(path.c_str(), header);
+            break;
+        
+        default:
+            return false;
         }
-
-        auto const results = resolver.resolve(host, port);
-        beast::get_lowest_layer(stream).connect(results);
-        stream.handshake(ssl::stream_base::client);
-        http::request<http::string_body> req{method, path, 11};
-        req.set(http::field::host, host);
-        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        req.body() = request;
-        req.prepare_payload();
-        if (header)
-        {
-            for (auto &item : *header)
-            {
-                req.set(item.first, item.second);
-            }
-        }
-
-        http::write(stream, req);
-        beast::flat_buffer buffer;
-
-        http::response<http::string_body> res;
-        http::read(stream, buffer, res);
-        if (resp)
-        {
-            *resp = res.body();
-        }
-
-        beast::error_code ec;
-        stream.shutdown(ec);
-        if (ec == net::error::eof)
-        {
-            ec = {};
-        }
-
-        if (ec)
-        {
-            throw beast::system_error{ec};
-        }
+        resp_str = resp->body;
     }
     catch (...)
     {
@@ -372,7 +355,7 @@ static bool dnspod_api(const std::string &path,
 static std::string get_current_ip()
 {
     std::string host_ip;
-    http_sync_request(boost::beast::http::verb::get, "ifconfig.me", "443", "/ip", "", nullptr, &host_ip);
+    //http_sync_request(boost::beast::http::verb::get, "ifconfig.me", "443", "/ip", "", nullptr, &host_ip);
     return host_ip;
 }
 

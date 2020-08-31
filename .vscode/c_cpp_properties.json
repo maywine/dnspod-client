@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/3rd/json/single_include"
+                "${workspaceFolder}/3rd/json/single_include",
+                "${workspaceFolder}/3rd/"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",
