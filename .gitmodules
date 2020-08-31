@@ -1,3 +1,6 @@
 [submodule "3rd/json"]
 	path = 3rd/json
 	url = https://github.com/nlohmann/json.git
+[submodule "3rd/http"]
+	path = 3rd/http
+	url = https://github.com/yhirose/cpp-httplib.git
