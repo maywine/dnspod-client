@@ -152,6 +152,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
         {
             if (count % (15 * 60 / 5) == 0) // 15 mim get ip from dnspod
             {
+                LOG_MSG("get domain info");
                 domain_info_map.clear();
                 while (true)
                 {
@@ -217,7 +218,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                         //update dns record
                         if (update_dns_record(it->second.domain_id, record.record_id, sub_domain, record.record_type, current_ip, ttl))
                         {
-                            LOG_MSG("update domain: %s to: s%", domain.c_str(), current_ip.c_str());
+                            LOG_MSG("update domain: %s to: %s", domain.c_str(), current_ip.c_str());
                             record.record_value = current_ip;
                         }
                     }
