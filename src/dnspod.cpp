@@ -1,11 +1,11 @@
 #include <sys/time.h>
 #include <sys/timerfd.h>
 
-#include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <cstdlib>
+#include <unistd.h>
+#include <time.h>
 #include <iostream>
 #include <string>
 #include <map>
@@ -56,6 +56,21 @@ struct domain_info
     std::vector<record_info> record_info_vec;
 };
 
+struct do_on_exit
+{
+    explicit do_on_exit(std::function<void(void)> hd) : do_on_exit_hd_(hd) {}
+    ~do_on_exit()
+    {
+        if (do_on_exit_hd_)
+        {
+            do_on_exit_hd_();
+        }
+    }
+
+private:
+    std::function<void(void)> do_on_exit_hd_;
+};
+
 static std::string GetValue(const nlohmann::json &js,
                             const std::string &key,
                             const char *default_value);
@@ -74,7 +89,7 @@ static bool http_sync_request(const http_method method,
                               std::string &resp_str);
 
 static bool dnspod_api(const std::string &path,
-                       const std::string &request,
+                       std::string &request,
                        nlohmann::json &resp_js);
 
 static std::string get_current_ip();
@@ -154,6 +169,13 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
             return;
         }
 
+        do_on_exit on_exit([&timer_fd]() {
+            if (timer_fd > 0)
+            {
+                close(timer_fd);
+            }
+        });
+
         struct itimerspec its;
         memset(&its, 0, sizeof(struct itimerspec));
         its.it_interval.tv_sec = 0;
@@ -205,7 +227,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
             current_ip = get_current_ip();
             if (std::regex_match(current_ip, ip_reg))
             {
-                for (auto &item : domain_list_js)
+                for (const auto &item : domain_list_js)
                 {
                     if (!item.is_object())
                     {
@@ -500,7 +522,7 @@ static std::string get_current_time()
     {
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
-        std::string tm_str(std::ctime(&t));
+        std::string tm_str(ctime(&t));
         tm_str.pop_back();
         return tm_str;
     }
