@@ -507,6 +507,7 @@ static bool update_dns_record(const std::string &domain_id,
     wrap_request_str("record_type", record_type, req_str);
     wrap_request_str("value", ip, req_str);
     wrap_request_str("ttl", ttl, req_str);
+    wrap_request_str("record_line", "%e9%bb%98%e8%ae%a4", req_str);
     nlohmann::json resp_js;
     if (!dnspod_api("/Record.Modify", req_str, resp_js))
     {
