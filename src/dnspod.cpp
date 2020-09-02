@@ -203,7 +203,6 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                 }
 
                 LOG_MSG("get domain info");
-                domain_info_map.clear();
                 while (true)
                 {
                     get_domain_list(domain_info_map);
@@ -212,12 +211,6 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                         LOG_MSG("try domain list failed");
                         std::this_thread::sleep_for(std::chrono::seconds(10));
                         continue;
-                    }
-
-                    for (auto &item : domain_info_map)
-                    {
-                        item.second.record_info_vec.reserve(item.second.record_info_set.size());
-                        std::copy(item.second.record_info_set.begin(), item.second.record_info_set.end(), std::back_inserter(item.second.record_info_vec));
                     }
 
                     break;
@@ -427,6 +420,7 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
 {
     try
     {
+        domain_info_map.clear();
         std::string req_str;
         nlohmann::json resp_js;
         if (!dnspod_api("/Domain.List", req_str, resp_js)) //Domain.List
@@ -484,6 +478,8 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
                     }
                 }
 
+                domain.record_info_vec.reserve(domain.record_info_set.size());
+                std::copy(domain.record_info_set.begin(), domain.record_info_set.end(), std::back_inserter(domain.record_info_vec));
                 domain_info_map.emplace(std::move(domain_str), std::move(domain));
             }
         }
