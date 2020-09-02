@@ -1,3 +1,6 @@
+#include <sys/time.h>
+#include <sys/timerfd.h>
+
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -22,7 +25,7 @@
 
 static std::string get_current_time();
 
-#define LOG_MSG(fmt, args...) fprintf(stderr, "%s: " fmt "\n", get_current_time().c_str(), ## args)
+#define LOG_MSG(fmt, args...) fprintf(stderr, "%s: " fmt "\n", get_current_time().c_str(), ##args)
 
 enum http_method
 {
@@ -56,7 +59,7 @@ struct domain_info
 static std::string GetValue(const nlohmann::json &js,
                             const std::string &key,
                             const char *default_value);
-                        
+
 static void wrap_request_str(const std::string &key,
                              const std::string &value,
                              std::string &req_str);
@@ -144,14 +147,39 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
 {
     try
     {
-        uint64_t count = 0;
+        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (timer_fd < 0)
+        {
+            LOG_MSG("timerfd_create failed, errno:%d, desc:%s", errno, strerror(errno));
+            return;
+        }
+
+        struct itimerspec its;
+        memset(&its, 0, sizeof(struct itimerspec));
+        its.it_interval.tv_sec = 0;
+        its.it_value.tv_sec = 600;
+        if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
+        {
+            LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
+            return;
+        }
+
         std::string current_ip;
         std::regex ip_reg("((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})(\\.((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})){3}");
 
         while (true)
         {
-            if (count % (15 * 60 / 5) == 0) // 15 mim get ip from dnspod
+            uint64_t count = 0;
+            ssize_t err = 0;
+            err = read(timer_fd, &count, sizeof(uint64_t));
+            if (err == sizeof(uint64_t))
             {
+                if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
+                {
+                    LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
+                    return;
+                }
+
                 LOG_MSG("get domain info");
                 domain_info_map.clear();
                 while (true)
@@ -225,12 +253,12 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                 }
             }
 
-            ++count;
-            std::this_thread::sleep_for(std::chrono::seconds(15));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     }
     catch (const std::exception &err)
     {
+        LOG_MSG("update_dns_loop catch exception : %s", err.what());
     }
 }
 
@@ -243,7 +271,7 @@ static std::string GetValue(const nlohmann::json &js, const std::string &key, co
     }
 
     try
-    {   
+    {
         if (it->is_string())
         {
             return *it;
@@ -264,7 +292,7 @@ static std::string GetValue(const nlohmann::json &js, const std::string &key, co
         {
             return std::to_string(int64_t(*it));
         }
-        else 
+        else
         {
             return std::string(default_value);
         }
@@ -291,20 +319,20 @@ static bool http_sync_request(const http_method method,
         httplib::Result resp(nullptr, httplib::Error::Unknown);
         switch (method)
         {
-        case http_method::kGET :
+        case http_method::kGET:
             resp = cli.Get(path.c_str(), header);
             break;
-        case http_method::kPUT :
+        case http_method::kPUT:
             resp = cli.Put(path.c_str(), header, request, content_type.c_str());
             break;
-        case http_method::kPOST :
+        case http_method::kPOST:
             resp = cli.Post(path.c_str(), header, request, content_type.c_str());
             break;
-        case http_method::kDELETE :
+        case http_method::kDELETE:
             resp = cli.Delete(path.c_str(), header);
             break;
 
-        default :
+        default:
             return false;
         }
 
@@ -313,7 +341,7 @@ static bool http_sync_request(const http_method method,
             resp_str = resp->body;
             return true;
         }
-        else 
+        else
         {
             return false;
         }
@@ -330,7 +358,7 @@ static bool dnspod_api(const std::string &path,
 {
     try
     {
-        static const std::string dnspod_api_host = "dnsapi.cn"; 
+        static const std::string dnspod_api_host = "dnsapi.cn";
         static const std::string agent = "AnripDdns/6.0.0(mail@anrip.com)";
         wrap_request_str("login_token", s_g_dnspod_token, request);
         wrap_request_str("format", "json", request);
@@ -353,7 +381,7 @@ static bool dnspod_api(const std::string &path,
             LOG_MSG("dnspod_api failed, resp: %s", resp.c_str());
             return false;
         }
-        else 
+        else
         {
             return true;
         }
@@ -363,7 +391,6 @@ static bool dnspod_api(const std::string &path,
         LOG_MSG("dnspod_api failed, catch exception:%s", err.what());
         return false;
     }
-
 }
 
 static std::string get_current_ip()
