@@ -384,6 +384,7 @@ static bool dnspod_api(const std::string &path,
         static const std::string agent = "AnripDdns/6.0.0(mail@anrip.com)";
         wrap_request_str("login_token", s_g_dnspod_token, request);
         wrap_request_str("format", "json", request);
+        wrap_request_str("lang", "cn", request);
 
         httplib::Headers header;
         header.emplace("User-Agent", agent);
