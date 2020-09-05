@@ -139,8 +139,7 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        nlohmann::json config_json;
-        ifs >> config_json;
+        nlohmann::json config_json = nlohmann::json::parse(ifs, nullptr, true, true);
 
         s_g_dnspod_token = GetValue(config_json, "token", "");
         if (s_g_dnspod_token.empty())
