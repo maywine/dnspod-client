@@ -39,8 +39,9 @@ setsid dnspod /your/config/path/config.json >> ~/log/dns_pod.log 2>&1 &
 
 a example config:
 
-```json
+```bash
 {
+    // you can get this at https://console.dnspod.cn/account/token
     "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token
 
     // the domain info
@@ -63,7 +64,7 @@ curl --http1.1 -X GET -L https://ifconfig.me/ip
 
 your can set up the query url:
 
-```json
+```bash
 {
     // you can get this at https://console.dnspod.cn/account/token
     "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
