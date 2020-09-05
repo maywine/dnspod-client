@@ -35,6 +35,15 @@ enum http_method
     kDELETE
 };
 
+struct query_ip_config
+{
+    uint16_t port = 443;
+    http_method method = http_method::kGET;
+    std::string host = "ifconfig.me";
+    std::string path = "/ip";
+    std::string key = "";
+};
+
 struct record_info
 {
     std::string record_id;
@@ -70,6 +79,9 @@ struct do_on_exit
 private:
     std::function<void(void)> do_on_exit_hd_;
 };
+
+template <typename T>
+static T GetValue(const nlohmann::json &js, const std::string &key, const T &&default_value);
 
 static std::string GetValue(const nlohmann::json &js,
                             const std::string &key,
@@ -108,6 +120,8 @@ static void update_dns_loop(const nlohmann::json &domain_list_js,
 
 static std::string s_g_dnspod_token = "";
 
+static query_ip_config s_g_query_ip_config;
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -140,6 +154,33 @@ int main(int argc, char **argv)
         {
             LOG_MSG("domain_list invalid");
             return 1;
+        }
+
+        auto query_it = config_json.find("query_ip_host");
+        if (query_it != config_json.end() && query_it->is_object())
+        {
+            std::string method = GetValue(*query_it, "method", "GET");
+            if (method == "GET")
+            {
+                s_g_query_ip_config.method = http_method::kGET;
+            }
+            else if (method == "POST")
+            {
+                s_g_query_ip_config.method = http_method::kPOST;
+            }
+            else if (method == "PUT")
+            {
+                s_g_query_ip_config.method = http_method::kPUT;
+            }
+            else if (method == "DELETE")
+            {
+                s_g_query_ip_config.method = http_method::kDELETE;
+            }
+
+            s_g_query_ip_config.port = GetValue(*query_it, "port", 443);
+            s_g_query_ip_config.host = GetValue(*query_it, "host", "ifconfig.me");
+            s_g_query_ip_config.path = GetValue(*query_it, "path", "/ip");
+            s_g_query_ip_config.key = GetValue(*query_it, "key", "");
         }
 
         std::map<std::string, domain_info> domain_info_map;
@@ -277,6 +318,25 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
     }
 }
 
+template <typename T>
+static T GetValue(const nlohmann::json &js, const std::string &key, const T &&default_value)
+{
+    auto it = js.find(key);
+    if (it == js.end())
+    {
+        return default_value;
+    }
+
+    try
+    {
+       return it->get<T>();
+    }
+    catch (...)
+    {
+        return default_value;
+    }
+}
+
 static std::string GetValue(const nlohmann::json &js, const std::string &key, const char *default_value)
 {
     auto it = js.find(key);
@@ -330,7 +390,18 @@ static bool http_sync_request(const http_method method,
     try
     {
         httplib::SSLClient cli(host, port);
+        cli.set_read_timeout(5, 0);
+        cli.set_write_timeout(5, 0);
+        cli.set_connection_timeout(5, 0);
         cli.enable_server_certificate_verification(true);
+        auto ctx_ssl = cli.ssl_context();
+        static const unsigned char alpn[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+        if (SSL_CTX_set_alpn_protos(ctx_ssl, alpn, sizeof(alpn)) != 0)
+        {
+            LOG_MSG("SSL_CTX_set_alpn_protos failed");
+            return false;
+        }
+
         httplib::Result resp(nullptr, httplib::Error::Unknown);
         switch (method)
         {
@@ -361,8 +432,9 @@ static bool http_sync_request(const http_method method,
             return false;
         }
     }
-    catch (...)
+    catch (const std::exception &err)
     {
+        LOG_MSG("err:%s", err.what());
         return false;
     }
 }
@@ -412,7 +484,14 @@ static bool dnspod_api(const std::string &path,
 static std::string get_current_ip()
 {
     std::string host_ip;
-    http_sync_request(http_method::kGET, "ifconfig.me", 443, "/ip", httplib::Headers(), "", "", host_ip);
+    http_sync_request(s_g_query_ip_config.method,
+                      s_g_query_ip_config.host,
+                      s_g_query_ip_config.port,
+                      s_g_query_ip_config.path,
+                      httplib::Headers(),
+                      "application/x-www-form-urlencoded",
+                      s_g_query_ip_config.key,
+                      host_ip);
     return host_ip;
 }
 
