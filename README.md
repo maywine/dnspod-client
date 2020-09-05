@@ -1,2 +1,96 @@
-# d-dnspod
-dnspod-client
+# dnspod-client
+Dnspod client with c++, dynamically update domain name records when your public IP changes by get the current IP periodically. For example, I deploy it at my own Raspberry Pi 4.
+
+### build
+
+```
+git clone https://github.com/maywine/dnspod-client.git
+
+cd dnspod-client
+
+git submodule init
+
+git submodule update
+
+mkdir build
+
+cd build
+
+cmake ../
+
+make && make install
+```
+
+### usage
+
+dnspod-client read config from json file:
+
+```bash
+dnspod  /your/config/path/config.json
+```
+
+run in the background:
+
+```bash
+setsid dnspod /your/config/path/config.json >> ~/log/dns_pod.log 2>&1 &
+```
+
+### config format
+
+a example config:
+
+```json
+{
+    "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token
+
+    // the domain info
+    // you need add the domain record to dnspod firstly
+    "domain_list":[
+        {
+            "domain": "domain.com", // domain name
+            "sub_domain": "@" // http:://domain.com is @
+                              // http:://www.domain.com is wwww
+                              // http:://abc.domain.com is abc
+        }
+    ]
+}
+```
+the  default url to check what your public IP is is https://ifconfig.me/ip, equivalent to call with curl:
+
+```bash
+curl --http1.1 -X GET -L https://ifconfig.me/ip
+```
+
+your can set up the query url:
+
+```json
+{
+    // you can get this at https://console.dnspod.cn/account/token
+    "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
+
+    // the domain info
+    // you need add the domain record to dnspod firstly
+    "domain_list":[
+        {
+            "domain": "domain.com", // domain name
+            "sub_domain": "@" // http:://domain.com is @
+                              // http:://www.domain.com is wwww
+                              // http:://abc.domain.com is abc
+        }
+    ],
+
+    // the query url info
+    "query_ip_host": {
+        "method": "GET", // http method
+        "host": "ifconfig.me", // the host
+        "port": 443, // port
+        "path": "/ip" // url
+    }
+}
+```
+
+equivalent to call with curl:
+
+```bash
+curl --http1.1 -X GET -L https://ifconfig.me:443/ip
+```
