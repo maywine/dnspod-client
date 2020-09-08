@@ -455,7 +455,7 @@ static bool dnspod_api(const std::string &path,
         header.emplace("Host", dnspod_api_host);
         std::string resp;
         http_sync_request(http_method::kPOST, dnspod_api_host, 443, path, header, "application/x-www-form-urlencoded", request, resp);
-        resp_js = nlohmann::json::parse(resp);
+        resp_js = nlohmann::json::parse(resp, nullptr, false);
         auto it = resp_js.find("status");
         if (it == resp_js.end() || !it->is_object())
         {
