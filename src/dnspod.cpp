@@ -1,19 +1,19 @@
 #include <sys/time.h>
 #include <sys/timerfd.h>
 
-#include <stdlib.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <time.h>
-#include <iostream>
-#include <string>
-#include <map>
-#include <set>
-#include <fstream>
-#include <thread>
 #include <chrono>
+#include <fcntl.h>
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <regex>
+#include <set>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <thread>
+#include <time.h>
+#include <unistd.h>
 
 #include <nlohmann/json.hpp>
 
@@ -37,11 +37,11 @@ enum http_method
 
 struct query_ip_config
 {
-    uint16_t port = 443;
+    uint16_t port      = 443;
     http_method method = http_method::kGET;
-    std::string host = "ifconfig.me";
-    std::string path = "/ip";
-    std::string key = "";
+    std::string host   = "ifconfig.me";
+    std::string path   = "/ip";
+    std::string key    = "";
 };
 
 struct record_info
@@ -51,9 +51,10 @@ struct record_info
     std::string record_type;
     std::string record_value;
     std::string ttl;
-    inline bool operator<(const record_info &other) const
+    inline bool operator<(const record_info& other) const
     {
-        return record_id < other.record_id || record_sub_domain < other.record_sub_domain || record_type < other.record_type || record_value < other.record_value;
+        return record_id < other.record_id || record_sub_domain < other.record_sub_domain
+            || record_type < other.record_type || record_value < other.record_value;
     }
 };
 
@@ -80,49 +81,41 @@ private:
     std::function<void(void)> do_on_exit_hd_;
 };
 
-template <typename T>
-static T GetValue(const nlohmann::json &js, const std::string &key, const T &&default_value);
+template <typename T> static T GetValue(const nlohmann::json& js, const std::string& key, const T&& default_value);
 
-static std::string GetValue(const nlohmann::json &js,
-                            const std::string &key,
-                            const char *default_value);
+static std::string GetValue(const nlohmann::json& js, const std::string& key, const char* default_value);
 
-static void wrap_request_str(const std::string &key,
-                             const std::string &value,
-                             std::string &req_str);
+static void wrap_request_str(const std::string& key, const std::string& value, std::string& req_str);
 
 static bool http_sync_request(const http_method method,
-                              const std::string &host,
+                              const std::string& host,
                               const uint16_t port,
-                              const std::string &path,
-                              const httplib::Headers &header,
-                              const std::string &content_type,
-                              const std::string &request,
-                              std::string &resp_str);
+                              const std::string& path,
+                              const httplib::Headers& header,
+                              const std::string& content_type,
+                              const std::string& request,
+                              std::string& resp_str);
 
-static bool dnspod_api(const std::string &path,
-                       std::string &request,
-                       nlohmann::json &resp_js);
+static bool dnspod_api(const std::string& path, std::string& request, nlohmann::json& resp_js);
 
 static std::string get_current_ip();
 
-static void get_domain_list(std::map<std::string, domain_info> &domain_info_map);
+static void get_domain_list(std::map<std::string, domain_info>& domain_info_map);
 
-static bool update_dns_record(const std::string &domain_id,
-                              const std::string &record_id,
-                              const std::string &sub_domain,
-                              const std::string &record_type,
-                              const std::string &ip,
-                              const std::string &ttl);
+static bool update_dns_record(const std::string& domain_id,
+                              const std::string& record_id,
+                              const std::string& sub_domain,
+                              const std::string& record_type,
+                              const std::string& ip,
+                              const std::string& ttl);
 
-static void update_dns_loop(const nlohmann::json &domain_list_js,
-                            std::map<std::string, domain_info> &domain_info_map);
+static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::string, domain_info>& domain_info_map);
 
 static std::string s_g_dnspod_token = "";
 
 static query_ip_config s_g_query_ip_config;
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     if (argc < 2)
     {
@@ -179,7 +172,7 @@ int main(int argc, char **argv)
             s_g_query_ip_config.port = GetValue(*query_it, "port", 443);
             s_g_query_ip_config.host = GetValue(*query_it, "host", "ifconfig.me");
             s_g_query_ip_config.path = GetValue(*query_it, "path", "/ip");
-            s_g_query_ip_config.key = GetValue(*query_it, "key", "");
+            s_g_query_ip_config.key  = GetValue(*query_it, "key", "");
         }
 
         std::map<std::string, domain_info> domain_info_map;
@@ -191,14 +184,14 @@ int main(int argc, char **argv)
 
         update_dns_loop(*domain_it, domain_info_map);
     }
-    catch (const std::exception &err)
+    catch (const std::exception& err)
     {
         LOG_MSG("main, catch exception:%s", err.what());
         return 1;
     }
 }
 
-static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::string, domain_info> &domain_info_map)
+static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::string, domain_info>& domain_info_map)
 {
     try
     {
@@ -219,7 +212,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
         struct itimerspec its;
         memset(&its, 0, sizeof(struct itimerspec));
         its.it_interval.tv_sec = 0;
-        its.it_value.tv_sec = 600;
+        its.it_value.tv_sec    = 600;
         if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
         {
             LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
@@ -232,8 +225,8 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
         while (true)
         {
             uint64_t count = 0;
-            ssize_t err = 0;
-            err = read(timer_fd, &count, sizeof(uint64_t));
+            ssize_t err    = 0;
+            err            = read(timer_fd, &count, sizeof(uint64_t));
             if (err == sizeof(uint64_t))
             {
                 if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
@@ -260,7 +253,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
             current_ip = get_current_ip();
             if (std::regex_match(current_ip, ip_reg))
             {
-                for (const auto &item : domain_list_js)
+                for (const auto& item : domain_list_js)
                 {
                     if (!item.is_object())
                     {
@@ -268,7 +261,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                         exit(1);
                     }
 
-                    auto domain = GetValue(item, "domain", "");
+                    auto domain     = GetValue(item, "domain", "");
                     auto sub_domain = GetValue(item, "sub_domain", "");
                     if (domain.empty() || sub_domain.empty())
                     {
@@ -285,7 +278,7 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                     }
 
                     // update dns record
-                    for (auto &record : it->second.record_info_vec)
+                    for (auto& record : it->second.record_info_vec)
                     {
                         if (record.record_id.empty() || record.record_sub_domain.empty())
                         {
@@ -298,8 +291,13 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
                             continue;
                         }
 
-                        //update dns record
-                        if (update_dns_record(it->second.domain_id, record.record_id, sub_domain, record.record_type, current_ip, ttl))
+                        // update dns record
+                        if (update_dns_record(it->second.domain_id,
+                                              record.record_id,
+                                              sub_domain,
+                                              record.record_type,
+                                              current_ip,
+                                              ttl))
                         {
                             LOG_MSG("update domain: %s to: %s", domain.c_str(), current_ip.c_str());
                             record.record_value = current_ip;
@@ -311,14 +309,13 @@ static void update_dns_loop(const nlohmann::json &domain_list_js, std::map<std::
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     }
-    catch (const std::exception &err)
+    catch (const std::exception& err)
     {
         LOG_MSG("update_dns_loop catch exception : %s", err.what());
     }
 }
 
-template <typename T>
-static T GetValue(const nlohmann::json &js, const std::string &key, const T &&default_value)
+template <typename T> static T GetValue(const nlohmann::json& js, const std::string& key, const T&& default_value)
 {
     auto it = js.find(key);
     if (it == js.end())
@@ -328,7 +325,7 @@ static T GetValue(const nlohmann::json &js, const std::string &key, const T &&de
 
     try
     {
-       return it->get<T>();
+        return it->get<T>();
     }
     catch (...)
     {
@@ -336,7 +333,7 @@ static T GetValue(const nlohmann::json &js, const std::string &key, const T &&de
     }
 }
 
-static std::string GetValue(const nlohmann::json &js, const std::string &key, const char *default_value)
+static std::string GetValue(const nlohmann::json& js, const std::string& key, const char* default_value)
 {
     auto it = js.find(key);
     if (it == js.end())
@@ -378,13 +375,13 @@ static std::string GetValue(const nlohmann::json &js, const std::string &key, co
 }
 
 static bool http_sync_request(const http_method method,
-                              const std::string &host,
+                              const std::string& host,
                               const uint16_t port,
-                              const std::string &path,
-                              const httplib::Headers &header,
-                              const std::string &content_type,
-                              const std::string &request,
-                              std::string &resp_str)
+                              const std::string& path,
+                              const httplib::Headers& header,
+                              const std::string& content_type,
+                              const std::string& request,
+                              std::string& resp_str)
 {
     try
     {
@@ -393,7 +390,7 @@ static bool http_sync_request(const http_method method,
         cli.set_write_timeout(5, 0);
         cli.set_connection_timeout(5, 0);
         cli.enable_server_certificate_verification(true);
-        auto ctx_ssl = cli.ssl_context();
+        auto ctx_ssl                      = cli.ssl_context();
         static const unsigned char alpn[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
         if (SSL_CTX_set_alpn_protos(ctx_ssl, alpn, sizeof(alpn)) != 0)
         {
@@ -431,21 +428,19 @@ static bool http_sync_request(const http_method method,
             return false;
         }
     }
-    catch (const std::exception &err)
+    catch (const std::exception& err)
     {
         LOG_MSG("err:%s", err.what());
         return false;
     }
 }
 
-static bool dnspod_api(const std::string &path,
-                       std::string &request,
-                       nlohmann::json &resp_js)
+static bool dnspod_api(const std::string& path, std::string& request, nlohmann::json& resp_js)
 {
     try
     {
         static const std::string dnspod_api_host = "dnsapi.cn";
-        static const std::string agent = "AnripDdns/6.0.0(mail@anrip.com)";
+        static const std::string agent           = "AnripDdns/6.0.0(mail@anrip.com)";
         wrap_request_str("login_token", s_g_dnspod_token, request);
         wrap_request_str("format", "json", request);
         wrap_request_str("lang", "cn", request);
@@ -454,7 +449,8 @@ static bool dnspod_api(const std::string &path,
         header.emplace("User-Agent", agent);
         header.emplace("Host", dnspod_api_host);
         std::string resp;
-        http_sync_request(http_method::kPOST, dnspod_api_host, 443, path, header, "application/x-www-form-urlencoded", request, resp);
+        http_sync_request(
+            http_method::kPOST, dnspod_api_host, 443, path, header, "application/x-www-form-urlencoded", request, resp);
         resp_js = nlohmann::json::parse(resp, nullptr, false);
         auto it = resp_js.find("status");
         if (it == resp_js.end() || !it->is_object())
@@ -473,7 +469,7 @@ static bool dnspod_api(const std::string &path,
             return true;
         }
     }
-    catch (const std::exception &err)
+    catch (const std::exception& err)
     {
         LOG_MSG("dnspod_api failed, catch exception:%s", err.what());
         return false;
@@ -494,14 +490,14 @@ static std::string get_current_ip()
     return host_ip;
 }
 
-static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
+static void get_domain_list(std::map<std::string, domain_info>& domain_info_map)
 {
     try
     {
         domain_info_map.clear();
         std::string req_str;
         nlohmann::json resp_js;
-        if (!dnspod_api("/Domain.List", req_str, resp_js)) //Domain.List
+        if (!dnspod_api("/Domain.List", req_str, resp_js))  // Domain.List
         {
             LOG_MSG("get domain list failed");
             return;
@@ -510,7 +506,7 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
         auto it = resp_js.find("domains");
         if (it != resp_js.end() && it->is_array())
         {
-            for (auto &item : *it)
+            for (auto& item : *it)
             {
                 if (!item.is_object())
                 {
@@ -519,7 +515,7 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
 
                 domain_info domain;
                 std::string domain_str = GetValue(item, "name", "");
-                domain.domain = domain_str;
+                domain.domain          = domain_str;
 
                 domain.domain_id = GetValue(item, "id", "");
                 if (domain.domain.empty() || domain.domain_id.empty())
@@ -530,7 +526,7 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
                 std::string req_str;
                 wrap_request_str("domain_id", domain.domain_id, req_str);
                 nlohmann::json resp_js;
-                if (!dnspod_api("/Record.List", req_str, resp_js)) //Record.List
+                if (!dnspod_api("/Record.List", req_str, resp_js))  // Record.List
                 {
                     LOG_MSG("get domain: %s record list failed", domain_str.c_str());
                     continue;
@@ -539,7 +535,7 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
                 auto it = resp_js.find("records");
                 if (it != resp_js.end() && it->is_array())
                 {
-                    for (auto &item : *it)
+                    for (auto& item : *it)
                     {
                         if (!item.is_object())
                         {
@@ -547,33 +543,35 @@ static void get_domain_list(std::map<std::string, domain_info> &domain_info_map)
                         }
 
                         record_info record;
-                        record.record_id = GetValue(item, "id", "");
-                        record.record_sub_domain = GetValue(item, "name", ""); //@, www,
-                        record.record_type = GetValue(item, "type", "A");      //A, AAAA
-                        record.record_value = GetValue(item, "value", "");     // IP
-                        record.ttl = GetValue(item, "ttl", "");                // ttl
+                        record.record_id         = GetValue(item, "id", "");
+                        record.record_sub_domain = GetValue(item, "name", "");  //@, www,
+                        record.record_type       = GetValue(item, "type", "A");  // A, AAAA
+                        record.record_value      = GetValue(item, "value", "");  // IP
+                        record.ttl               = GetValue(item, "ttl", "");  // ttl
                         domain.record_info_set.insert(std::move(record));
                     }
                 }
 
                 domain.record_info_vec.reserve(domain.record_info_set.size());
-                std::copy(domain.record_info_set.begin(), domain.record_info_set.end(), std::back_inserter(domain.record_info_vec));
+                std::copy(domain.record_info_set.begin(),
+                          domain.record_info_set.end(),
+                          std::back_inserter(domain.record_info_vec));
                 domain_info_map.emplace(std::move(domain_str), std::move(domain));
             }
         }
     }
-    catch (const std::exception &err)
+    catch (const std::exception& err)
     {
         LOG_MSG("get_domain_list failed, catch exception:%s", err.what());
     }
 }
 
-static bool update_dns_record(const std::string &domain_id,
-                              const std::string &record_id,
-                              const std::string &sub_domain,
-                              const std::string &record_type,
-                              const std::string &ip,
-                              const std::string &ttl)
+static bool update_dns_record(const std::string& domain_id,
+                              const std::string& record_id,
+                              const std::string& sub_domain,
+                              const std::string& record_type,
+                              const std::string& ip,
+                              const std::string& ttl)
 {
     std::string req_str;
     wrap_request_str("domain_id", domain_id, req_str);
@@ -596,7 +594,7 @@ static std::string get_current_time()
 {
     try
     {
-        auto now = std::chrono::system_clock::now();
+        auto now      = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         std::string tm_str(ctime(&t));
         tm_str.pop_back();
@@ -608,9 +606,7 @@ static std::string get_current_time()
     }
 }
 
-static void wrap_request_str(const std::string &key,
-                             const std::string &value,
-                             std::string &req_str)
+static void wrap_request_str(const std::string& key, const std::string& value, std::string& req_str)
 {
     if (!req_str.empty())
     {
