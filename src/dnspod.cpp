@@ -25,7 +25,7 @@
 
 static std::string get_current_time();
 
-#define LOG_MSG(fmt, args...) fprintf(stderr, "%s: " fmt "\n", get_current_time().c_str(), ##args)
+#define LOG_MSG(fmt, ...) fprintf(stderr, "%s: " fmt "\n", get_current_time().c_str(), ##__VA_ARGS__)
 
 enum http_method
 {

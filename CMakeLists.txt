@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.0.0)
+cmake_minimum_required (VERSION 3.16)
 project(dnspod_client VERSION 1.0  LANGUAGES CXX)
 
 if(NOT CMAKE_C_STANDARD)
@@ -12,8 +12,6 @@ set(CMAKE_CXX_EXTENSIONS 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) 
 endif()
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
 # default release
 # Set a default build type if none was specified
@@ -47,6 +45,13 @@ target_include_directories(dnspod
         ${PROJECT_SOURCE_DIR}/3rd
         ${PROJECT_SOURCE_DIR}/3rd/json/single_include
 )
+
+target_compile_options(dnspod
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror)
 
 target_link_libraries(dnspod PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(dnspod PRIVATE Threads::Threads rt)
