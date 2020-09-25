@@ -35,6 +35,32 @@ run in the background:
 setsid dnspod /your/config/path/config.json >> ~/log/dns_pod.log 2>&1 &
 ```
 
+or use systemctl for management by create the **/etc/systemd/system/dnspod.service/etc/systemd/system/dnspod.service** file and enter the following:
+
+```bash
+[Unit]
+Description=dnspod-client
+After=network.target network-online.target nss-lookup.target
+
+[Service]
+Type=simple
+StandardError=journal
+User=nobody
+ExecStart=/usr/local/bin/dnspod /usr/local/etc/dnspod-client/config.json
+Restart=on-failure
+RestartSec=15s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+then start dnspod:
+
+```bash
+sudo systemctl enable dnspod.service
+sudo systemctl start dnspod.service
+```
+
 ### config format
 
 a example config:
