@@ -1,6 +1,7 @@
 #include <sys/time.h>
 #include <sys/timerfd.h>
 
+#include <atomic>
 #include <chrono>
 #include <fcntl.h>
 #include <fstream>
@@ -8,6 +9,7 @@
 #include <map>
 #include <regex>
 #include <set>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -192,6 +194,14 @@ int main(int argc, char** argv)
     }
 }
 
+void sig_handler(int sig, siginfo_t* info, void*)
+{
+    if (sig == SIGUSR1 && info != nullptr && info->si_int == 0x1234)
+    {
+        pthread_exit(nullptr);
+    }
+}
+
 static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::string, domain_info>& domain_info_map)
 {
     try
@@ -223,91 +233,133 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
         std::string current_ip;
         std::regex ip_reg("((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})(\\.((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})){3}");
 
-        while (true)
-        {
-            uint64_t count = 0;
-            ssize_t err    = 0;
-            err            = read(timer_fd, &count, sizeof(uint64_t));
-            if (err == sizeof(uint64_t))
+        std::atomic_uint64_t loop_times = {0};
+
+        auto main_loop = [&]() {
+            struct sigaction sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sa_flags     = SA_RESTART | SA_SIGINFO;
+            sa.sa_sigaction = sig_handler;
+            if (sigaction(SIGUSR1, &sa, nullptr) != 0)
             {
-                if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
-                {
-                    LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
-                    return;
-                }
-
-                LOG_MSG("get domain info");
-                while (true)
-                {
-                    get_domain_list(domain_info_map);
-                    if (domain_info_map.empty())
-                    {
-                        LOG_MSG("try domain list failed");
-                        std::this_thread::sleep_for(std::chrono::seconds(10));
-                        continue;
-                    }
-
-                    break;
-                }
+                LOG_MSG("sigaction failed, errno:%d, desc:%s", errno, strerror(errno));
+                _exit(1);
             }
 
-            current_ip = get_current_ip();
-            if (std::regex_match(current_ip, ip_reg))
+            while (true)
             {
-                for (const auto& item : domain_list_js)
+                uint64_t count = 0;
+                ssize_t err    = 0;
+                err            = read(timer_fd, &count, sizeof(uint64_t));
+                if (err == sizeof(uint64_t))
                 {
-                    if (!item.is_object())
+                    if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
                     {
-                        LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
-                        exit(1);
+                        LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
+                        return;
                     }
 
-                    auto domain     = GetValue(item, "domain", "");
-                    auto sub_domain = GetValue(item, "sub_domain", "");
-                    if (domain.empty() || sub_domain.empty())
+                    LOG_MSG("get domain info");
+                    while (true)
                     {
-                        LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
-                        exit(1);
-                    }
-                    auto ttl = GetValue(item, "ttl", "600");
-
-                    auto it = domain_info_map.find(domain);
-                    if (it == domain_info_map.end())
-                    {
-                        LOG_MSG("cann't find domain: %s at dnspod list", domain.c_str());
-                        exit(1);
-                    }
-
-                    // update dns record
-                    for (auto& record : it->second.record_info_vec)
-                    {
-                        if (record.record_id.empty() || record.record_sub_domain.empty())
+                        get_domain_list(domain_info_map);
+                        if (domain_info_map.empty())
                         {
+                            LOG_MSG("try domain list failed");
+                            std::this_thread::sleep_for(std::chrono::seconds(10));
                             continue;
                         }
 
-                        // Last IP is the same as current IP
-                        if (current_ip == record.record_value)
+                        break;
+                    }
+                }
+
+                current_ip = get_current_ip();
+                if (std::regex_match(current_ip, ip_reg))
+                {
+                    for (const auto& item : domain_list_js)
+                    {
+                        if (!item.is_object())
                         {
-                            continue;
+                            LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
+                            exit(1);
+                        }
+
+                        auto domain     = GetValue(item, "domain", "");
+                        auto sub_domain = GetValue(item, "sub_domain", "");
+                        if (domain.empty() || sub_domain.empty())
+                        {
+                            LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
+                            exit(1);
+                        }
+                        auto ttl = GetValue(item, "ttl", "600");
+
+                        auto it = domain_info_map.find(domain);
+                        if (it == domain_info_map.end())
+                        {
+                            LOG_MSG("cann't find domain: %s at dnspod list", domain.c_str());
+                            exit(1);
                         }
 
                         // update dns record
-                        if (update_dns_record(it->second.domain_id,
-                                              record.record_id,
-                                              sub_domain,
-                                              record.record_type,
-                                              current_ip,
-                                              ttl))
+                        for (auto& record : it->second.record_info_vec)
                         {
-                            LOG_MSG("update domain: %s to: %s", domain.c_str(), current_ip.c_str());
-                            record.record_value = current_ip;
+                            if (record.record_id.empty() || record.record_sub_domain.empty())
+                            {
+                                continue;
+                            }
+
+                            // Last IP is the same as current IP
+                            if (current_ip == record.record_value)
+                            {
+                                continue;
+                            }
+
+                            // update dns record
+                            if (update_dns_record(it->second.domain_id,
+                                                  record.record_id,
+                                                  sub_domain,
+                                                  record.record_type,
+                                                  current_ip,
+                                                  ttl))
+                            {
+                                LOG_MSG("update domain: %s to: %s", domain.c_str(), current_ip.c_str());
+                                record.record_value = current_ip;
+                            }
                         }
                     }
                 }
-            }
 
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                ++loop_times;
+            }
+        };
+
+        uint64_t last_loop_times = 0;
+        std::thread thread;
+    retry:
+        thread = std::thread(main_loop);
+        while (true)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(5 * 60));
+            auto now_loop_time = loop_times.load();
+            if (last_loop_times == now_loop_time)
+            {
+                union sigval sval;
+                sval.sival_int = 0x1234;
+                if (pthread_sigqueue(thread.native_handle(), SIGUSR1, sval) != 0)
+                {
+                    LOG_MSG("pthread_sigqueue failed, errno:%d, desc:%s", errno, strerror(errno));
+                    _exit(1);
+                }
+                thread.join();
+                LOG_MSG("kill blocked thread and retry");
+                goto retry;
+            }
+            else
+            {
+                last_loop_times = now_loop_time;
+            }
         }
     }
     catch (const std::exception& err)
