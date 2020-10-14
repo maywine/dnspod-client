@@ -35,7 +35,7 @@ run in the background:
 setsid dnspod /your/config/path/config.json >> ~/log/dns_pod.log 2>&1 &
 ```
 
-or use systemctl for management by create the **/etc/systemd/system/dnspod.service/etc/systemd/system/dnspod.service** file and enter the following:
+or use systemctl for management by create the **/etc/systemd/system/dnspod.service** file and enter the following:
 
 ```bash
 [Unit]
