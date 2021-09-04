@@ -213,12 +213,14 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
             return;
         }
 
-        do_on_exit on_exit([&timer_fd]() {
-            if (timer_fd > 0)
+        do_on_exit on_exit(
+            [&timer_fd]()
             {
-                close(timer_fd);
-            }
-        });
+                if (timer_fd > 0)
+                {
+                    close(timer_fd);
+                }
+            });
 
         struct itimerspec its;
         memset(&its, 0, sizeof(struct itimerspec));
@@ -235,7 +237,8 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
 
         std::atomic_uint64_t loop_times = {0};
 
-        auto main_loop = [&]() {
+        auto main_loop = [&]()
+        {
             struct sigaction sa;
             memset(&sa, 0, sizeof(sa));
             sa.sa_flags     = SA_RESTART | SA_SIGINFO;
@@ -277,6 +280,7 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
                 current_ip = get_current_ip();
                 if (std::regex_match(current_ip, ip_reg))
                 {
+                    // iterator user domain list
                     for (const auto& item : domain_list_js)
                     {
                         if (!item.is_object())
@@ -293,7 +297,7 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
                             exit(1);
                         }
                         auto ttl = GetValue(item, "ttl", "600");
-
+                        // domain
                         auto it = domain_info_map.find(domain);
                         if (it == domain_info_map.end())
                         {
@@ -301,16 +305,13 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
                             exit(1);
                         }
 
+                        // iterator record list
                         // update dns record
                         for (auto& record : it->second.record_info_vec)
                         {
-                            if (record.record_id.empty() || record.record_sub_domain.empty())
-                            {
-                                continue;
-                            }
-
-                            // Last IP is the same as current IP
-                            if (current_ip == record.record_value)
+                            // the sub domain must match
+                            if (record.record_id.empty() || record.record_sub_domain.empty()
+                                || record.record_sub_domain != sub_domain || current_ip == record.record_value)
                             {
                                 continue;
                             }
