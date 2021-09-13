@@ -65,7 +65,7 @@ sudo systemctl start dnspod.service
 
 a example config:
 
-```bash
+```json
 {
     // you can get this at https://console.dnspod.cn/account/token
     "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token
@@ -82,15 +82,15 @@ a example config:
     ]
 }
 ```
-the  default url to check what your public IP is is https://ifconfig.me/ip, equivalent to call with curl:
+the default url to check what your public IP is is https://ifconfig.me/ip, equivalent to call with curl:
 
 ```bash
 curl --http1.1 -X GET -L https://ifconfig.me/ip
 ```
 
-your can set up the query url:
+you can set up the query url:
 
-```bash
+```json
 {
     // you can get this at https://console.dnspod.cn/account/token
     "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
@@ -121,3 +121,31 @@ equivalent to call with curl:
 ```bash
 curl --http1.1 -X GET -L https://ifconfig.me:443/ip
 ```
+
+you can also use the traceroute command to get the public IP :
+```json
+{
+    // you can get this at https://console.dnspod.cn/account/token
+    "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
+
+    // the domain info
+    // you need add the domain record to dnspod firstly
+    "domain_list":[
+        {
+            "domain": "domain.com", // domain name
+            "sub_domain": "@" // http:://domain.com is @
+                              // http:://www.domain.com is wwww
+                              // http:://abc.domain.com is abc
+        }
+    ],
+
+    // traceroute command
+    "traceroute": {
+        // you need to test this command at your host
+        // You need to adjust the number '2' according to the actual situation 
+        "cmd": "traceroute -m 2 www.baidu.com | awk '{if (NR>2){print $2}}'|cut -d ':' -f 2",
+    }
+}
+```
+
+Tip: may need to install the traceroute command firstly. 

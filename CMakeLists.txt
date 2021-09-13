@@ -8,7 +8,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 endif()
 
 if(NOT CMAKE_CXX_EXTENSIONS)
-set(CMAKE_CXX_EXTENSIONS 11)
+set(CMAKE_CXX_EXTENSIONS 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) 
 endif()
@@ -38,6 +38,8 @@ elseif(OPENSSL_VERSION VERSION_LESS "1.1.1")
     message(FATAL_ERROR "Fatal error: OpenSSL (version >= 1.1.1) required.\n")
 endif(NOT OPENSSL_FOUND)
 
+ADD_DEFINITIONS(-DCPPHTTPLIB_OPENSSL_SUPPORT)
+
 add_executable(dnspod)
 
 target_sources(dnspod 
@@ -55,7 +57,8 @@ target_compile_options(dnspod
         -Wall
         -Wextra
         -Wpedantic
-        -Werror)
+        -Werror
+        -Wno-format-truncation)
 
 target_link_libraries(dnspod PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(dnspod PRIVATE Threads::Threads rt)

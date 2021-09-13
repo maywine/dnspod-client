@@ -1,33 +1,25 @@
-#include <sys/time.h>
-#include <sys/timerfd.h>
-
 #include <atomic>
 #include <chrono>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <fcntl.h>
 #include <fstream>
+#include <http/httplib.h>
 #include <iostream>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <regex>
 #include <set>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string>
+#include <sys/time.h>
+#include <sys/timerfd.h>
 #include <thread>
-#include <time.h>
 #include <unistd.h>
 
-#include <nlohmann/json.hpp>
-
-#ifndef CPPHTTPLIB_OPENSSL_SUPPORT
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-#endif
-
-#include <http/httplib.h>
-
-static std::string get_current_time();
-
-#define __LOG_MSG(fmt, ...) fprintf(stderr, "%s: " fmt "%s", get_current_time().c_str(), __VA_ARGS__)
+static std::string get_time_str();
+#define __LOG_MSG(fmt, ...) fprintf(stdout, "%s " fmt "%s", get_time_str().c_str(), __VA_ARGS__)
 #define LOG_MSG(...) __LOG_MSG(__VA_ARGS__, "\n")
 
 enum http_method
@@ -36,6 +28,11 @@ enum http_method
     kPUT,
     kPOST,
     kDELETE
+};
+
+struct traceroute_cmd
+{
+    std::string cmd;
 };
 
 struct query_ip_config
@@ -71,7 +68,26 @@ struct domain_info
 
 struct do_on_exit
 {
-    explicit do_on_exit(std::function<void(void)> hd) : do_on_exit_hd_(hd) {}
+    do_on_exit(const do_on_exit&) = delete;
+    do_on_exit& operator=(const do_on_exit&) = delete;
+
+    do_on_exit(do_on_exit&& other) noexcept : do_on_exit_hd_(std::move(other.do_on_exit_hd_))
+    {
+        other.do_on_exit_hd_ = nullptr;
+    }
+
+    do_on_exit& operator=(do_on_exit&& other) noexcept
+    {
+        if (this != &other)
+        {
+            do_on_exit_hd_       = std::move(other.do_on_exit_hd_);
+            other.do_on_exit_hd_ = nullptr;
+        }
+
+        return *this;
+    }
+
+    explicit do_on_exit(std::function<void(void)> hd) : do_on_exit_hd_(std::move(hd)) {}
     ~do_on_exit()
     {
         if (do_on_exit_hd_)
@@ -116,6 +132,8 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
 
 static std::string s_g_dnspod_token = "";
 
+static bool s_g_is_cmd = false;
+static traceroute_cmd s_g_traceroute_cmd;
 static query_ip_config s_g_query_ip_config;
 
 int main(int argc, char** argv)
@@ -151,6 +169,14 @@ int main(int argc, char** argv)
             return 1;
         }
 
+        auto cmd_it = config_json.find("traceroute");
+        if (cmd_it != config_json.end() && cmd_it->is_object())
+        {
+            s_g_traceroute_cmd.cmd =
+                GetValue(*cmd_it, "cmd", "traceroute -m 2 www.baidu.com | awk '{if (NR>2){print $2}}'|cut -d ':' -f 2");
+            s_g_is_cmd = true;
+        }
+
         auto query_it = config_json.find("query_ip_host");
         if (query_it != config_json.end() && query_it->is_object())
         {
@@ -176,6 +202,7 @@ int main(int argc, char** argv)
             s_g_query_ip_config.host = GetValue(*query_it, "host", "ifconfig.me");
             s_g_query_ip_config.path = GetValue(*query_it, "path", "/ip");
             s_g_query_ip_config.key  = GetValue(*query_it, "key", "");
+            s_g_is_cmd               = false;
         }
 
         std::map<std::string, domain_info> domain_info_map;
@@ -213,17 +240,15 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
             return;
         }
 
-        do_on_exit on_exit(
-            [&timer_fd]()
+        do_on_exit on_exit([&timer_fd]() {
+            if (timer_fd > 0)
             {
-                if (timer_fd > 0)
-                {
-                    close(timer_fd);
-                }
-            });
+                close(timer_fd);
+            }
+        });
 
-        struct itimerspec its;
-        memset(&its, 0, sizeof(struct itimerspec));
+        struct itimerspec its = {};
+        memset(&its, 0, sizeof(its));
         its.it_interval.tv_sec = 0;
         its.it_value.tv_sec    = 600;
         if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
@@ -233,13 +258,12 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
         }
 
         std::string current_ip;
-        std::regex ip_reg("((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})(\\.((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})){3}");
+        std::regex ip_reg(R"(((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})(\.((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})){3})");
 
         std::atomic_uint64_t loop_times = {0};
 
-        auto main_loop = [&]()
-        {
-            struct sigaction sa;
+        auto main_loop = [&]() {
+            struct sigaction sa = {};
             memset(&sa, 0, sizeof(sa));
             sa.sa_flags     = SA_RESTART | SA_SIGINFO;
             sa.sa_sigaction = sig_handler;
@@ -346,8 +370,8 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
             auto now_loop_time = loop_times.load();
             if (last_loop_times == now_loop_time)
             {
-                union sigval sval;
-                sval.sival_int = 0x1234;
+                union sigval sval = {};
+                sval.sival_int    = 0x1234;
                 if (pthread_sigqueue(thread.native_handle(), SIGUSR1, sval) != 0)
                 {
                     LOG_MSG("pthread_sigqueue failed, errno:%d, desc:%s", errno, strerror(errno));
@@ -444,13 +468,6 @@ static bool http_sync_request(const http_method method,
         cli.set_write_timeout(5, 0);
         cli.set_connection_timeout(5, 0);
         cli.enable_server_certificate_verification(true);
-        auto ctx_ssl                      = cli.ssl_context();
-        static const unsigned char alpn[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
-        if (SSL_CTX_set_alpn_protos(ctx_ssl, alpn, sizeof(alpn)) != 0)
-        {
-            LOG_MSG("SSL_CTX_set_alpn_protos failed");
-            return false;
-        }
 
         httplib::Result resp(nullptr, httplib::Error::Unknown);
         switch (method)
@@ -469,6 +486,7 @@ static bool http_sync_request(const http_method method,
             break;
 
         default:
+            LOG_MSG("unknown http method");
             return false;
         }
 
@@ -479,6 +497,7 @@ static bool http_sync_request(const http_method method,
         }
         else
         {
+            LOG_MSG("http request failed");
             return false;
         }
     }
@@ -530,17 +549,51 @@ static bool dnspod_api(const std::string& path, std::string& request, nlohmann::
     }
 }
 
+static std::string execute_command(const std::string& cmd)
+{
+    auto* f = popen(cmd.c_str(), "r");
+    if (f == nullptr)
+    {
+        return "";
+    }
+
+    size_t pos = 0;
+    std::string buf;
+    while (true)
+    {
+        if (buf.size() <= pos)
+        {
+            buf.resize(buf.size() + 256);
+        }
+        pos += fread(&buf[pos], sizeof(char), buf.size() - pos, f);
+        if (feof(f) || ferror(f))
+        {
+            break;
+        }
+    }
+
+    buf.resize(pos);
+    return buf;
+}
+
 static std::string get_current_ip()
 {
     std::string host_ip;
-    http_sync_request(s_g_query_ip_config.method,
-                      s_g_query_ip_config.host,
-                      s_g_query_ip_config.port,
-                      s_g_query_ip_config.path,
-                      httplib::Headers(),
-                      "application/x-www-form-urlencoded",
-                      s_g_query_ip_config.key,
-                      host_ip);
+    if (!s_g_is_cmd)
+    {
+        http_sync_request(s_g_query_ip_config.method,
+                          s_g_query_ip_config.host,
+                          s_g_query_ip_config.port,
+                          s_g_query_ip_config.path,
+                          httplib::Headers(),
+                          "application/x-www-form-urlencoded",
+                          s_g_query_ip_config.key,
+                          host_ip);
+    }
+    else
+    {
+        host_ip = execute_command(s_g_traceroute_cmd.cmd);
+    }
     return host_ip;
 }
 
@@ -644,20 +697,33 @@ static bool update_dns_record(const std::string& domain_id,
     return true;
 }
 
-static std::string get_current_time()
+static std::string get_time_str()
 {
+    std::string time_str;
     try
     {
+        constexpr size_t date_fmt_len = 20;
+        time_str.resize(date_fmt_len);
         auto now      = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
-        std::string tm_str(ctime(&t));
-        tm_str.pop_back();
-        return tm_str;
+        struct tm tm  = {};
+        localtime_r(&t, &tm);
+        snprintf(&time_str[0],
+                 date_fmt_len,
+                 "%04d-%02d-%02d %02d:%02d:%02d",
+                 tm.tm_year + 1900,
+                 tm.tm_mon,
+                 tm.tm_mday,
+                 tm.tm_hour,
+                 tm.tm_min,
+                 tm.tm_sec);
     }
     catch (...)
     {
-        return "";
+        time_str.clear();
     }
+
+    return time_str;
 }
 
 static void wrap_request_str(const std::string& key, const std::string& value, std::string& req_str)

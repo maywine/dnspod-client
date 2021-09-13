@@ -70,6 +70,13 @@
         "valarray": "cpp",
         "variant": "cpp",
         "strstream": "cpp",
-        "cfenv": "cpp"
+        "cfenv": "cpp",
+        "hash_map": "cpp",
+        "hash_set": "cpp",
+        "csetjmp": "cpp",
+        "any": "cpp",
+        "charconv": "cpp",
+        "cuchar": "cpp",
+        "scoped_allocator": "cpp"
     }
 }
