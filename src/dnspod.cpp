@@ -30,11 +30,6 @@ enum http_method
     kDELETE
 };
 
-struct traceroute_cmd
-{
-    std::string cmd;
-};
-
 struct query_self_request
 {
     uint16_t port      = 443;
