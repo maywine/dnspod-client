@@ -576,6 +576,25 @@ static std::string execute_command(const std::string& cmd)
     return buf;
 }
 
+// trim from start (in place)
+static inline void ltrim(std::string& s)
+{
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+}
+
+// trim from end (in place)
+static inline void rtrim(std::string& s)
+{
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+}
+
+// trim from both ends (in place)
+static inline void trim(std::string& s)
+{
+    ltrim(s);
+    rtrim(s);
+}
+
 static std::string get_current_ip()
 {
     std::string host_ip;
@@ -593,6 +612,7 @@ static std::string get_current_ip()
     else
     {
         host_ip = execute_command(s_g_traceroute_cmd.cmd);
+        trim(host_ip);
     }
     return host_ip;
 }
