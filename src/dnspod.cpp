@@ -35,7 +35,7 @@ struct traceroute_cmd
     std::string cmd;
 };
 
-struct query_ip_config
+struct query_self_request
 {
     uint16_t port      = 443;
     http_method method = http_method::kGET;
@@ -133,8 +133,8 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
 static std::string s_g_dnspod_token = "";
 
 static bool s_g_is_cmd = false;
-static traceroute_cmd s_g_traceroute_cmd;
-static query_ip_config s_g_query_ip_config;
+static std::string s_g_query_self_cmd;
+static query_self_request s_g_query_self_request;
 
 int main(int argc, char** argv)
 {
@@ -169,40 +169,42 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        auto cmd_it = config_json.find("traceroute");
-        if (cmd_it != config_json.end() && cmd_it->is_object())
+        auto query_cmd_it = config_json.find("query_self_cmd");
+        if (query_cmd_it != config_json.end() && query_cmd_it->is_string())
         {
-            s_g_traceroute_cmd.cmd =
-                GetValue(*cmd_it, "cmd", "traceroute -m 2 www.baidu.com | awk '{if (NR>2){print $2}}'|cut -d ':' -f 2");
+            s_g_query_self_cmd =
+                GetValue(*query_cmd_it,
+                         "cmd",
+                         "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'");
             s_g_is_cmd = true;
         }
 
-        auto query_it = config_json.find("query_ip_host");
-        if (query_it != config_json.end() && query_it->is_object())
+        auto query_req_it = config_json.find("query_self_request");
+        if (query_req_it != config_json.end() && query_req_it->is_object())
         {
-            std::string method = GetValue(*query_it, "method", "GET");
+            std::string method = GetValue(*query_req_it, "method", "GET");
             if (method == "GET")
             {
-                s_g_query_ip_config.method = http_method::kGET;
+                s_g_query_self_request.method = http_method::kGET;
             }
             else if (method == "POST")
             {
-                s_g_query_ip_config.method = http_method::kPOST;
+                s_g_query_self_request.method = http_method::kPOST;
             }
             else if (method == "PUT")
             {
-                s_g_query_ip_config.method = http_method::kPUT;
+                s_g_query_self_request.method = http_method::kPUT;
             }
             else if (method == "DELETE")
             {
-                s_g_query_ip_config.method = http_method::kDELETE;
+                s_g_query_self_request.method = http_method::kDELETE;
             }
 
-            s_g_query_ip_config.port = GetValue(*query_it, "port", 443);
-            s_g_query_ip_config.host = GetValue(*query_it, "host", "ifconfig.me");
-            s_g_query_ip_config.path = GetValue(*query_it, "path", "/ip");
-            s_g_query_ip_config.key  = GetValue(*query_it, "key", "");
-            s_g_is_cmd               = false;
+            s_g_query_self_request.port = GetValue(*query_req_it, "port", 443);
+            s_g_query_self_request.host = GetValue(*query_req_it, "host", "ifconfig.me");
+            s_g_query_self_request.path = GetValue(*query_req_it, "path", "/ip");
+            s_g_query_self_request.key  = GetValue(*query_req_it, "key", "");
+            s_g_is_cmd                  = false;
         }
 
         std::map<std::string, domain_info> domain_info_map;
@@ -600,18 +602,18 @@ static std::string get_current_ip()
     std::string host_ip;
     if (!s_g_is_cmd)
     {
-        http_sync_request(s_g_query_ip_config.method,
-                          s_g_query_ip_config.host,
-                          s_g_query_ip_config.port,
-                          s_g_query_ip_config.path,
+        http_sync_request(s_g_query_self_request.method,
+                          s_g_query_self_request.host,
+                          s_g_query_self_request.port,
+                          s_g_query_self_request.path,
                           httplib::Headers(),
                           "application/x-www-form-urlencoded",
-                          s_g_query_ip_config.key,
+                          s_g_query_self_request.key,
                           host_ip);
     }
     else
     {
-        host_ip = execute_command(s_g_traceroute_cmd.cmd);
+        host_ip = execute_command(s_g_query_self_cmd);
         trim(host_ip);
     }
     return host_ip;

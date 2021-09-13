@@ -107,7 +107,7 @@ you can set up the query url:
     ],
 
     // the query url info
-    "query_ip_host": {
+    "query_self_request": {
         "method": "GET", // http method
         "host": "ifconfig.me", // the host
         "port": 443, // port
@@ -122,7 +122,7 @@ equivalent to call with curl:
 curl --http1.1 -X GET -L https://ifconfig.me:443/ip
 ```
 
-you can also use the traceroute command to get the public IP :
+you can also use command to get the public IP :
 ```json
 {
     // you can get this at https://console.dnspod.cn/account/token
@@ -139,13 +139,7 @@ you can also use the traceroute command to get the public IP :
         }
     ],
 
-    // traceroute command
-    "traceroute": {
-        // you need to test this command at your host
-        // You need to adjust the number '2' according to the actual situation 
-        "cmd": "traceroute -m 2 www.baidu.com | awk '{if (NR>2){print $2}}'|cut -d ':' -f 2",
-    }
+    // command
+    "query_self_cmd": "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'"
 }
 ```
-
-Tip: may need to install the traceroute command firstly. 
