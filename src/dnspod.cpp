@@ -1,55 +1,76 @@
-#include <atomic>
-#include <chrono>
+// system
+#include <fcntl.h>
+#include <sys/time.h>
+#include <sys/timerfd.h>
+#include <unistd.h>
+
+// c std
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <fcntl.h>
+
+// cpp std
+#include <atomic>
+#include <chrono>
 #include <fstream>
-#include <http/httplib.h>
 #include <iostream>
 #include <map>
-#include <nlohmann/json.hpp>
 #include <regex>
 #include <set>
 #include <string>
-#include <sys/time.h>
-#include <sys/timerfd.h>
 #include <thread>
-#include <unistd.h>
+
+// 3rd
+#include <http/httplib.h>
+#include <nlohmann/json.hpp>
 
 static std::string get_time_str();
 #define __LOG_MSG(fmt, ...) fprintf(stdout, "%s " fmt "%s", get_time_str().c_str(), __VA_ARGS__)
 #define LOG_MSG(...) __LOG_MSG(__VA_ARGS__, "\n")
 
-enum http_method
+struct config
 {
-    kGET = 0,
-    kPUT,
-    kPOST,
-    kDELETE
-};
+    enum http_method
+    {
+        kGET = 0,
+        kPUT,
+        kPOST,
+        kDELETE
+    };
 
-struct query_self_request
-{
-    uint16_t port      = 443;
-    http_method method = http_method::kGET;
-    std::string host   = "ifconfig.me";
-    std::string path   = "/ip";
-    std::string key    = "";
+    std::string dnspod_token;
+    struct
+    {
+        bool is_cmd        = false;
+        uint16_t port      = 443;
+        uint32_t interval  = 10;
+        http_method method = http_method::kGET;
+        std::string cmd;
+        std::string body;
+        std::string host = "ifconfig.me";
+        std::string path = "/ip";
+    } query_self_info;
+
+    struct domain_type
+    {
+        std::string domain;
+        std::string sub_domain;
+        std::string ttl;
+    };
+    std::vector<domain_type> domain_list;
 };
 
 struct record_info
 {
-    std::string record_id;
-    std::string record_sub_domain;
-    std::string record_type;
-    std::string record_value;
+    std::string id;
+    std::string sub_domain;
+    std::string type;
+    std::string value;
     std::string ttl;
     inline bool operator<(const record_info& other) const
     {
-        return record_id < other.record_id || record_sub_domain < other.record_sub_domain
-            || record_type < other.record_type || record_value < other.record_value;
+        return id < other.id || sub_domain < other.sub_domain || type < other.type || value < other.value;
     }
 };
 
@@ -101,7 +122,7 @@ static std::string GetValue(const nlohmann::json& js, const std::string& key, co
 
 static void wrap_request_str(const std::string& key, const std::string& value, std::string& req_str);
 
-static bool http_sync_request(const http_method method,
+static bool http_sync_request(const config::http_method method,
                               const std::string& host,
                               const uint16_t port,
                               const std::string& path,
@@ -123,13 +144,9 @@ static bool update_dns_record(const std::string& domain_id,
                               const std::string& ip,
                               const std::string& ttl);
 
-static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::string, domain_info>& domain_info_map);
+static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map);
 
-static std::string s_g_dnspod_token = "";
-
-static bool s_g_is_cmd = false;
-static std::string s_g_query_self_cmd;
-static query_self_request s_g_query_self_request;
+static config global_config;
 
 int main(int argc, char** argv)
 {
@@ -150,10 +167,10 @@ int main(int argc, char** argv)
 
         nlohmann::json config_json = nlohmann::json::parse(ifs, nullptr, true, true);
 
-        s_g_dnspod_token = GetValue(config_json, "token", "");
-        if (s_g_dnspod_token.empty())
+        global_config.dnspod_token = GetValue(config_json, "token", "");
+        if (global_config.dnspod_token.empty())
         {
-            LOG_MSG("token is empty");
+            LOG_MSG("dnspod token is empty");
             return 1;
         }
 
@@ -163,15 +180,41 @@ int main(int argc, char** argv)
             LOG_MSG("domain_list invalid");
             return 1;
         }
+        for (auto& item : *domain_it)
+        {
+            if (!item.is_object())
+            {
+                LOG_MSG("domain_list invalid");
+                return 1;
+            }
+
+            auto it = item.find("domain");
+            if (it == item.end() || !it.value().is_string())
+            {
+                LOG_MSG("domain_list invalid");
+                return 1;
+            }
+            config::domain_type domain;
+            domain.domain = it.value();
+            it            = item.find("sub_domain");
+            if (it == item.end() || !it.value().is_string())
+            {
+                LOG_MSG("domain_list invalid");
+                return 1;
+            }
+            domain.sub_domain = it.value();
+            domain.ttl        = GetValue(item, "ttl", "600");
+            global_config.domain_list.emplace_back(std::move(domain));
+        }
 
         auto query_cmd_it = config_json.find("query_self_cmd");
         if (query_cmd_it != config_json.end() && query_cmd_it->is_string())
         {
-            s_g_query_self_cmd =
+            global_config.query_self_info.cmd =
                 GetValue(*query_cmd_it,
                          "cmd",
                          "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'");
-            s_g_is_cmd = true;
+            global_config.query_self_info.is_cmd = true;
         }
 
         auto query_req_it = config_json.find("query_self_request");
@@ -180,27 +223,29 @@ int main(int argc, char** argv)
             std::string method = GetValue(*query_req_it, "method", "GET");
             if (method == "GET")
             {
-                s_g_query_self_request.method = http_method::kGET;
+                global_config.query_self_info.method = config::http_method::kGET;
             }
             else if (method == "POST")
             {
-                s_g_query_self_request.method = http_method::kPOST;
+                global_config.query_self_info.method = config::http_method::kPOST;
             }
             else if (method == "PUT")
             {
-                s_g_query_self_request.method = http_method::kPUT;
+                global_config.query_self_info.method = config::http_method::kPUT;
             }
             else if (method == "DELETE")
             {
-                s_g_query_self_request.method = http_method::kDELETE;
+                global_config.query_self_info.method = config::http_method::kDELETE;
             }
 
-            s_g_query_self_request.port = GetValue(*query_req_it, "port", 443);
-            s_g_query_self_request.host = GetValue(*query_req_it, "host", "ifconfig.me");
-            s_g_query_self_request.path = GetValue(*query_req_it, "path", "/ip");
-            s_g_query_self_request.key  = GetValue(*query_req_it, "key", "");
-            s_g_is_cmd                  = false;
+            global_config.query_self_info.port   = GetValue(*query_req_it, "port", 443);
+            global_config.query_self_info.host   = GetValue(*query_req_it, "host", "ifconfig.me");
+            global_config.query_self_info.path   = GetValue(*query_req_it, "path", "/ip");
+            global_config.query_self_info.body   = GetValue(*query_req_it, "body", "");
+            global_config.query_self_info.is_cmd = false;
         }
+
+        global_config.query_self_info.interval = GetValue(config_json, "interval", 10);
 
         std::map<std::string, domain_info> domain_info_map;
         get_domain_list(domain_info_map);
@@ -209,7 +254,7 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        update_dns_loop(*domain_it, domain_info_map);
+        update_dns_loop(domain_info_map);
     }
     catch (const std::exception& err)
     {
@@ -226,7 +271,7 @@ void sig_handler(int sig, siginfo_t* info, void*)
     }
 }
 
-static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::string, domain_info>& domain_info_map)
+static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
 {
     try
     {
@@ -234,7 +279,19 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
         if (timer_fd < 0)
         {
             LOG_MSG("timerfd_create failed, errno:%d, desc:%s", errno, strerror(errno));
-            return;
+            _exit(1);
+        }
+        int flag = fcntl(timer_fd, F_GETFD);
+        if (flag == -1)
+        {
+            LOG_MSG("fcntl failed, errno:%d, desc:%s", errno, strerror(errno));
+            _exit(1);
+        }
+        flag |= FD_CLOEXEC;
+        if (fcntl(timer_fd, F_SETFD, flag) == -1)
+        {
+            LOG_MSG("fcntl failed, errno:%d, desc:%s", errno, strerror(errno));
+            _exit(1);
         }
 
         do_on_exit on_exit([&timer_fd]() {
@@ -302,27 +359,13 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
                 if (std::regex_match(current_ip, ip_reg))
                 {
                     // iterator user domain list
-                    for (const auto& item : domain_list_js)
+                    for (const auto& item : global_config.domain_list)
                     {
-                        if (!item.is_object())
-                        {
-                            LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
-                            exit(1);
-                        }
-
-                        auto domain     = GetValue(item, "domain", "");
-                        auto sub_domain = GetValue(item, "sub_domain", "");
-                        if (domain.empty() || sub_domain.empty())
-                        {
-                            LOG_MSG("invalid domain_list: %s", domain_list_js.dump().c_str());
-                            exit(1);
-                        }
-                        auto ttl = GetValue(item, "ttl", "600");
                         // domain
-                        auto it = domain_info_map.find(domain);
+                        auto it = domain_info_map.find(item.domain);
                         if (it == domain_info_map.end())
                         {
-                            LOG_MSG("cann't find domain: %s at dnspod list", domain.c_str());
+                            LOG_MSG("cann't find domain: %s at dnspod list", item.domain.c_str());
                             exit(1);
                         }
 
@@ -331,28 +374,27 @@ static void update_dns_loop(const nlohmann::json& domain_list_js, std::map<std::
                         for (auto& record : it->second.record_info_vec)
                         {
                             // the sub domain must match
-                            if (record.record_id.empty() || record.record_sub_domain.empty()
-                                || record.record_sub_domain != sub_domain || current_ip == record.record_value)
+                            if (record.id.empty() || record.sub_domain.empty() || record.sub_domain != item.sub_domain
+                                || current_ip == record.value)
                             {
                                 continue;
                             }
 
                             // update dns record
                             if (update_dns_record(it->second.domain_id,
-                                                  record.record_id,
-                                                  sub_domain,
-                                                  record.record_type,
+                                                  record.id,
+                                                  item.sub_domain,
+                                                  record.type,
                                                   current_ip,
-                                                  ttl))
+                                                  item.ttl))
                             {
-                                LOG_MSG("update domain: %s to: %s", domain.c_str(), current_ip.c_str());
-                                record.record_value = current_ip;
+                                LOG_MSG("update domain: %s to: %s", item.domain.c_str(), current_ip.c_str());
+                                record.value = current_ip;
                             }
                         }
                     }
                 }
-
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+                std::this_thread::sleep_for(std::chrono::seconds(global_config.query_self_info.interval));
                 ++loop_times;
             }
         };
@@ -449,7 +491,7 @@ static std::string GetValue(const nlohmann::json& js, const std::string& key, co
     }
 }
 
-static bool http_sync_request(const http_method method,
+static bool http_sync_request(const config::http_method method,
                               const std::string& host,
                               const uint16_t port,
                               const std::string& path,
@@ -469,16 +511,16 @@ static bool http_sync_request(const http_method method,
         httplib::Result resp(nullptr, httplib::Error::Unknown);
         switch (method)
         {
-        case http_method::kGET:
+        case config::http_method::kGET:
             resp = cli.Get(path.c_str(), header);
             break;
-        case http_method::kPUT:
+        case config::http_method::kPUT:
             resp = cli.Put(path.c_str(), header, request, content_type.c_str());
             break;
-        case http_method::kPOST:
+        case config::http_method::kPOST:
             resp = cli.Post(path.c_str(), header, request, content_type.c_str());
             break;
-        case http_method::kDELETE:
+        case config::http_method::kDELETE:
             resp = cli.Delete(path.c_str(), header);
             break;
 
@@ -511,7 +553,7 @@ static bool dnspod_api(const std::string& path, std::string& request, nlohmann::
     {
         static const std::string dnspod_api_host = "dnsapi.cn";
         static const std::string agent           = "AnripDdns/6.0.0(mail@anrip.com)";
-        wrap_request_str("login_token", s_g_dnspod_token, request);
+        wrap_request_str("login_token", global_config.dnspod_token, request);
         wrap_request_str("format", "json", request);
         wrap_request_str("lang", "cn", request);
 
@@ -519,8 +561,14 @@ static bool dnspod_api(const std::string& path, std::string& request, nlohmann::
         header.emplace("User-Agent", agent);
         header.emplace("Host", dnspod_api_host);
         std::string resp;
-        http_sync_request(
-            http_method::kPOST, dnspod_api_host, 443, path, header, "application/x-www-form-urlencoded", request, resp);
+        http_sync_request(config::http_method::kPOST,
+                          dnspod_api_host,
+                          443,
+                          path,
+                          header,
+                          "application/x-www-form-urlencoded",
+                          request,
+                          resp);
         resp_js = nlohmann::json::parse(resp, nullptr, false);
         auto it = resp_js.find("status");
         if (it == resp_js.end() || !it->is_object())
@@ -568,8 +616,9 @@ static std::string execute_command(const std::string& cmd)
             break;
         }
     }
-
+    fclose(f);
     buf.resize(pos);
+
     return buf;
 }
 
@@ -595,20 +644,20 @@ static inline void trim(std::string& s)
 static std::string get_current_ip()
 {
     std::string host_ip;
-    if (!s_g_is_cmd)
+    if (!global_config.query_self_info.is_cmd)
     {
-        http_sync_request(s_g_query_self_request.method,
-                          s_g_query_self_request.host,
-                          s_g_query_self_request.port,
-                          s_g_query_self_request.path,
+        http_sync_request(global_config.query_self_info.method,
+                          global_config.query_self_info.host,
+                          global_config.query_self_info.port,
+                          global_config.query_self_info.path,
                           httplib::Headers(),
                           "application/x-www-form-urlencoded",
-                          s_g_query_self_request.key,
+                          global_config.query_self_info.body,
                           host_ip);
     }
     else
     {
-        host_ip = execute_command(s_g_query_self_cmd);
+        host_ip = execute_command(global_config.query_self_info.cmd);
         trim(host_ip);
     }
     return host_ip;
@@ -667,11 +716,11 @@ static void get_domain_list(std::map<std::string, domain_info>& domain_info_map)
                         }
 
                         record_info record;
-                        record.record_id         = GetValue(item, "id", "");
-                        record.record_sub_domain = GetValue(item, "name", "");  //@, www,
-                        record.record_type       = GetValue(item, "type", "A");  // A, AAAA
-                        record.record_value      = GetValue(item, "value", "");  // IP
-                        record.ttl               = GetValue(item, "ttl", "");  // ttl
+                        record.id         = GetValue(item, "id", "");
+                        record.sub_domain = GetValue(item, "name", "");  //@, www,
+                        record.type       = GetValue(item, "type", "A");  // A, AAAA
+                        record.value      = GetValue(item, "value", "");  // IP
+                        record.ttl        = GetValue(item, "ttl", "");  // ttl
                         domain.record_info_set.insert(std::move(record));
                     }
                 }

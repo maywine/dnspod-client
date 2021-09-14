@@ -93,16 +93,17 @@ you can set up the query url:
 ```json
 {
     // you can get this at https://console.dnspod.cn/account/token
-    "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
+    "dnspod_token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
 
     // the domain info
     // you need add the domain record to dnspod firstly
     "domain_list":[
         {
             "domain": "domain.com", // domain name
-            "sub_domain": "@" // http:://domain.com is @
-                              // http:://www.domain.com is wwww
-                              // http:://abc.domain.com is abc
+            "sub_domain": "@", // http:://domain.com is @
+                               // http:://www.domain.com is wwww
+                               // http:://abc.domain.com is abc
+            "ttl": 600 // option
         }
     ],
 
@@ -111,8 +112,12 @@ you can set up the query url:
         "method": "GET", // http method
         "host": "ifconfig.me", // the host
         "port": 443, // port
-        "path": "/ip" // url
-    }
+        "path": "/ip", // url
+        "body": "" // optional body
+    },
+
+    // query interval, default 10 second
+    "query_self_interval": 10
 }
 ```
 
@@ -126,20 +131,24 @@ you can also use command to get the public IP :
 ```json
 {
     // you can get this at https://console.dnspod.cn/account/token
-    "token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
+    "dnspod_token": "123456,aaaaabbbbbcccccc", // dnspod api id and token: "$api_id,$api_token"
 
     // the domain info
     // you need add the domain record to dnspod firstly
     "domain_list":[
         {
             "domain": "domain.com", // domain name
-            "sub_domain": "@" // http:://domain.com is @
-                              // http:://www.domain.com is wwww
-                              // http:://abc.domain.com is abc
+            "sub_domain": "@", // http:://domain.com is @
+                               // http:://www.domain.com is wwww
+                               // http:://abc.domain.com is abc
+            "ttl": 600 // optional ttl
         }
     ],
 
     // command
-    "query_self_cmd": "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'"
+    "query_self_cmd": "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'",
+
+    // query interval, default 10 second
+    "query_self_interval": 10
 }
 ```
