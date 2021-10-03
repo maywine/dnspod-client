@@ -57,8 +57,7 @@ target_compile_options(dnspod
         -Wall
         -Wextra
         -Wpedantic
-        -Werror
-        -Wno-format-truncation)
+        -Werror)
 
 target_link_libraries(dnspod PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(dnspod PRIVATE Threads::Threads rt)

@@ -774,15 +774,7 @@ static std::string get_time_str()
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         struct tm tm  = {};
         localtime_r(&t, &tm);
-        snprintf(&time_str[0],
-                 date_fmt_len,
-                 "%04d-%02d-%02d %02d:%02d:%02d",
-                 tm.tm_year + 1900,
-                 tm.tm_mon,
-                 tm.tm_mday,
-                 tm.tm_hour,
-                 tm.tm_min,
-                 tm.tm_sec);
+        strftime(&time_str[0], date_fmt_len, "%Y-%m-%d %T", &tm);
     }
     catch (...)
     {
