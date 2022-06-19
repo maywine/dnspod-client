@@ -276,25 +276,12 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
 {
     try
     {
-        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
         if (timer_fd < 0)
         {
             LOG_MSG("timerfd_create failed, errno:%d, desc:%s", errno, strerror(errno));
             _exit(1);
         }
-        int flag = fcntl(timer_fd, F_GETFD);
-        if (flag == -1)
-        {
-            LOG_MSG("fcntl failed, errno:%d, desc:%s", errno, strerror(errno));
-            _exit(1);
-        }
-        flag |= FD_CLOEXEC;
-        if (fcntl(timer_fd, F_SETFD, flag) == -1)
-        {
-            LOG_MSG("fcntl failed, errno:%d, desc:%s", errno, strerror(errno));
-            _exit(1);
-        }
-
         do_on_exit on_exit(
             [&timer_fd]()
             {
@@ -332,29 +319,31 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
             while (true)
             {
                 uint64_t count = 0;
-                ssize_t err    = 0;
-                err            = read(timer_fd, &count, sizeof(uint64_t));
-                if (err == sizeof(uint64_t))
+                ssize_t ret    = 0;
+                ret            = read(timer_fd, &count, sizeof(uint64_t));
+                if (ret != sizeof(uint64_t))
                 {
-                    if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
+                    continue;
+                }
+
+                if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
+                {
+                    LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
+                    return;
+                }
+
+                LOG_MSG("get domain info");
+                while (true)
+                {
+                    get_domain_list(domain_info_map);
+                    if (domain_info_map.empty())
                     {
-                        LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
-                        return;
+                        LOG_MSG("try domain list failed");
+                        std::this_thread::sleep_for(std::chrono::seconds(10));
+                        continue;
                     }
 
-                    LOG_MSG("get domain info");
-                    while (true)
-                    {
-                        get_domain_list(domain_info_map);
-                        if (domain_info_map.empty())
-                        {
-                            LOG_MSG("try domain list failed");
-                            std::this_thread::sleep_for(std::chrono::seconds(10));
-                            continue;
-                        }
-
-                        break;
-                    }
+                    break;
                 }
 
                 current_ip = get_current_ip();
