@@ -79,7 +79,10 @@ a example config:
                               // http:://www.domain.com is wwww
                               // http:://abc.domain.com is abc
         }
-    ]
+    ],
+
+    // dnspod api interval, default 60 second
+    "dnspod_api_interval": 60
 }
 ```
 the default url to check what your public IP is is https://ifconfig.me/ip, equivalent to call with curl:
@@ -116,8 +119,8 @@ you can set up the query url:
         "body": "" // optional body
     },
 
-    // query interval, default 10 second
-    "query_self_interval": 10
+    // dnspod api interval, default 60 second
+    "dnspod_api_interval": 60
 }
 ```
 
@@ -148,7 +151,7 @@ you can also use command to get the public IP :
     // command
     "query_self_cmd": "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'",
 
-    // query interval, default 10 second
-    "query_self_interval": 10
+    // dnspod api interval, default 60 second
+    "dnspod_api_interval": 60
 }
 ```

@@ -45,7 +45,6 @@ struct config
     {
         bool is_cmd        = false;
         uint16_t port      = 443;
-        uint32_t interval  = 10;
         http_method method = http_method::kGET;
         std::string cmd;
         std::string body;
@@ -60,6 +59,7 @@ struct config
         std::string ttl;
     };
     std::vector<domain_type> domain_list;
+    uint32_t dnspod_api_interval = 60;
 };
 
 struct record_info
@@ -214,10 +214,7 @@ int main(int argc, char** argv)
         auto query_cmd_it = config_json.find("query_self_cmd");
         if (query_cmd_it != config_json.end() && query_cmd_it->is_string())
         {
-            global_config.query_self_info.cmd =
-                GetValue(*query_cmd_it,
-                         "cmd",
-                         "curl -s -X GET -L https://1.1.1.1/cdn-cgi/trace | awk -F '=' '{if (NR==3){print $2}}'");
+            global_config.query_self_info.cmd    = *query_cmd_it;
             global_config.query_self_info.is_cmd = true;
         }
 
@@ -249,7 +246,7 @@ int main(int argc, char** argv)
             global_config.query_self_info.is_cmd = false;
         }
 
-        global_config.query_self_info.interval = GetValue(config_json, "interval", 10);
+        global_config.dnspod_api_interval = GetValue(config_json, "dnspod_api_interval", 60);
 
         std::map<std::string, domain_info> domain_info_map;
         get_domain_list(domain_info_map);
@@ -310,7 +307,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
         struct itimerspec its = {};
         memset(&its, 0, sizeof(its));
         its.it_interval.tv_sec = 0;
-        its.it_value.tv_sec    = 600;
+        its.it_value.tv_sec    = global_config.dnspod_api_interval;
         if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
         {
             LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
@@ -399,7 +396,6 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
                         }
                     }
                 }
-                std::this_thread::sleep_for(std::chrono::seconds(global_config.query_self_info.interval));
                 ++loop_times;
             }
         };
@@ -410,7 +406,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
         thread = std::thread(main_loop);
         while (true)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(5 * 60));
+            std::this_thread::sleep_for(std::chrono::seconds(30));
             auto now_loop_time = loop_times.load();
             if (last_loop_times == now_loop_time)
             {
