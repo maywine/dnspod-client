@@ -27,7 +27,7 @@
 #include <nlohmann/json.hpp>
 
 static std::string get_time_str();
-#define __LOG_MSG(fmt, ...) fprintf(stdout, "%s " fmt "%s", get_time_str().c_str(), __VA_ARGS__)
+#define __LOG_MSG(fmt, ...) fprintf(stderr, "%s " fmt "%s", get_time_str().c_str(), __VA_ARGS__)
 #define LOG_MSG(...) __LOG_MSG(__VA_ARGS__, "\n")
 
 struct config
