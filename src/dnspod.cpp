@@ -3,6 +3,7 @@
 #include <sys/time.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 // c std
 #include <csignal>
@@ -84,7 +85,7 @@ struct domain_info
 
 struct do_on_exit
 {
-    do_on_exit(const do_on_exit&) = delete;
+    do_on_exit(const do_on_exit&)            = delete;
     do_on_exit& operator=(const do_on_exit&) = delete;
 
     do_on_exit(do_on_exit&& other) noexcept : do_on_exit_hd_(std::move(other.do_on_exit_hd_))
@@ -104,6 +105,7 @@ struct do_on_exit
     }
 
     explicit do_on_exit(std::function<void(void)> hd) : do_on_exit_hd_(std::move(hd)) {}
+
     ~do_on_exit()
     {
         if (do_on_exit_hd_)
@@ -145,6 +147,8 @@ static bool update_dns_record(const std::string& domain_id,
                               const std::string& ttl);
 
 static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map);
+
+static bool is_valid_ip(const std::string& ip);
 
 static config global_config;
 
@@ -294,12 +298,14 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
             _exit(1);
         }
 
-        do_on_exit on_exit([&timer_fd]() {
-            if (timer_fd > 0)
+        do_on_exit on_exit(
+            [&timer_fd]()
             {
-                close(timer_fd);
-            }
-        });
+                if (timer_fd > 0)
+                {
+                    close(timer_fd);
+                }
+            });
 
         struct itimerspec its = {};
         memset(&its, 0, sizeof(its));
@@ -312,11 +318,10 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
         }
 
         std::string current_ip;
-        std::regex ip_reg(R"(((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})(\.((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})){3})");
-
         std::atomic_uint64_t loop_times = {0};
 
-        auto main_loop = [&]() {
+        auto main_loop = [&]()
+        {
             struct sigaction sa = {};
             memset(&sa, 0, sizeof(sa));
             sa.sa_flags     = SA_RESTART | SA_SIGINFO;
@@ -356,7 +361,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
                 }
 
                 current_ip = get_current_ip();
-                if (std::regex_match(current_ip, ip_reg))
+                if (is_valid_ip(current_ip))
                 {
                     // iterator user domain list
                     for (const auto& item : global_config.domain_list)
@@ -601,6 +606,7 @@ static std::string execute_command(const std::string& cmd)
     {
         return "";
     }
+    do_on_exit on_exit([&f]() { fclose(f); });
 
     size_t pos = 0;
     std::string buf;
@@ -616,7 +622,6 @@ static std::string execute_command(const std::string& cmd)
             break;
         }
     }
-    fclose(f);
     buf.resize(pos);
 
     return buf;
@@ -793,4 +798,10 @@ static void wrap_request_str(const std::string& key, const std::string& value, s
     req_str.append(key);
     req_str.append("=");
     req_str.append(value);
+}
+
+static bool is_valid_ip(const std::string& ip)
+{
+    struct in6_addr addr;
+    return inet_pton(AF_INET, ip.c_str(), &addr) == 1 || inet_pton(AF_INET6, ip.c_str(), &addr) == 1;
 }
