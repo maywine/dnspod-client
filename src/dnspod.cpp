@@ -59,7 +59,7 @@ struct config
         std::string ttl;
     };
     std::vector<domain_type> domain_list;
-    uint32_t dnspod_api_interval = 60;
+    uint32_t execute_interval = 10;
 };
 
 struct record_info
@@ -245,8 +245,7 @@ int main(int argc, char** argv)
             global_config.query_self_info.body   = GetValue(*query_req_it, "body", "");
             global_config.query_self_info.is_cmd = false;
         }
-
-        global_config.dnspod_api_interval = GetValue(config_json, "dnspod_api_interval", 60);
+        global_config.execute_interval = GetValue(config_json, "execute_interval", 10);
 
         std::map<std::string, domain_info> domain_info_map;
         get_domain_list(domain_info_map);
@@ -276,7 +275,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
 {
     try
     {
-        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+        int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
         if (timer_fd < 0)
         {
             LOG_MSG("timerfd_create failed, errno:%d, desc:%s", errno, strerror(errno));
@@ -294,17 +293,47 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
         struct itimerspec its = {};
         memset(&its, 0, sizeof(its));
         its.it_interval.tv_sec = 0;
-        its.it_value.tv_sec    = global_config.dnspod_api_interval;
+        its.it_value.tv_sec    = 600;
         if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
         {
             LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
             return;
         }
 
+        auto check_get_domain_list =
+            [](int timer_fd, struct itimerspec& its, std::map<std::string, domain_info>& domain_info_map)
+        {
+            uint64_t count = 0;
+            ssize_t ret    = 0;
+            ret            = read(timer_fd, &count, sizeof(uint64_t));
+            if (ret == sizeof(uint64_t))
+            {
+                if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
+                {
+                    LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
+                    return;
+                }
+                while (true)
+                {
+                    get_domain_list(domain_info_map);
+                    if (domain_info_map.empty())
+                    {
+                        LOG_MSG("try domain list failed");
+                        std::this_thread::sleep_for(std::chrono::seconds(10));
+                        continue;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                LOG_MSG("get domain info");
+            }
+        };
+
         std::string current_ip;
         std::atomic_uint64_t loop_times = {0};
-
-        auto main_loop = [&]()
+        auto main_loop                  = [&]()
         {
             struct sigaction sa = {};
             memset(&sa, 0, sizeof(sa));
@@ -318,34 +347,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
 
             while (true)
             {
-                uint64_t count = 0;
-                ssize_t ret    = 0;
-                ret            = read(timer_fd, &count, sizeof(uint64_t));
-                if (ret != sizeof(uint64_t))
-                {
-                    continue;
-                }
-
-                if (timerfd_settime(timer_fd, 0, &its, nullptr) != 0)
-                {
-                    LOG_MSG("timerfd_settime failed, errno:%d, desc:%s", errno, strerror(errno));
-                    return;
-                }
-
-                LOG_MSG("get domain info");
-                while (true)
-                {
-                    get_domain_list(domain_info_map);
-                    if (domain_info_map.empty())
-                    {
-                        LOG_MSG("try domain list failed");
-                        std::this_thread::sleep_for(std::chrono::seconds(10));
-                        continue;
-                    }
-
-                    break;
-                }
-
+                check_get_domain_list(timer_fd, its, domain_info_map);
                 current_ip = get_current_ip();
                 if (is_valid_ip(current_ip))
                 {
@@ -385,6 +387,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
                         }
                     }
                 }
+                std::this_thread::sleep_for(std::chrono::seconds(global_config.execute_interval));
                 ++loop_times;
             }
         };
@@ -395,7 +398,7 @@ static void update_dns_loop(std::map<std::string, domain_info>& domain_info_map)
         thread = std::thread(main_loop);
         while (true)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(30));
+            std::this_thread::sleep_for(std::chrono::seconds(global_config.execute_interval * 10));
             auto now_loop_time = loop_times.load();
             if (last_loop_times == now_loop_time)
             {
